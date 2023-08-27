@@ -1,5 +1,6 @@
 package com.alpsbte.plotsystemterra.core.plotsystem;
 
+import com.alpsbte.plotsystemterra.PlotSystemTerra;
 import com.alpsbte.plotsystemterra.core.DatabaseConnection;
 import com.alpsbte.plotsystemterra.utils.ItemBuilder;
 import com.alpsbte.plotsystemterra.utils.LoreBuilder;
@@ -21,28 +22,10 @@ public class CityProject {
     public CityProject(int ID) {
         this.ID = ID;
 
-        try (ResultSet rsCity = DatabaseConnection.createStatement("SELECT country_id, name FROM plotsystem_city_projects WHERE id = ?")
-                .setValue(ID).executeQuery()) {
-
-            if (rsCity.next()) {
-                this.countryID = rsCity.getInt(1);
-                this.name = rsCity.getString(2);
-            }
-
-            DatabaseConnection.closeResultSet(rsCity);
-
-            try (ResultSet rsCountry = DatabaseConnection.createStatement("SELECT head_id FROM plotsystem_countries WHERE id = ?")
-                    .setValue(countryID).executeQuery();) {
-
-                if (rsCountry.next()) {
-                    this.headID = rsCountry.getString(1);
-                }
-
-                DatabaseConnection.closeResultSet(rsCountry);
-
-            }
-        } catch (Exception ex) {
-            Bukkit.getLogger().log(Level.SEVERE, "An error occurred while getting country head!", ex);
+        if(PlotSystemTerra.getPlugin().usesDatabase()){
+            setupUsingDB();
+        } else {
+            setupUsingAPI();
         }
     }
 
@@ -106,5 +89,35 @@ public class CityProject {
                         .addLine("§bID: §7" + getID())
                         .build())
                 .build();
+    }
+
+    private void setupUsingDB(){
+        try (ResultSet rsCity = DatabaseConnection.createStatement("SELECT country_id, name FROM plotsystem_city_projects WHERE id = ?")
+                .setValue(ID).executeQuery()) {
+
+            if (rsCity.next()) {
+                this.countryID = rsCity.getInt(1);
+                this.name = rsCity.getString(2);
+            }
+
+            DatabaseConnection.closeResultSet(rsCity);
+
+            try (ResultSet rsCountry = DatabaseConnection.createStatement("SELECT head_id FROM plotsystem_countries WHERE id = ?")
+                    .setValue(countryID).executeQuery();) {
+
+                if (rsCountry.next()) {
+                    this.headID = rsCountry.getString(1);
+                }
+
+                DatabaseConnection.closeResultSet(rsCountry);
+
+            }
+        } catch (Exception ex) {
+            Bukkit.getLogger().log(Level.SEVERE, "An error occurred while getting country head!", ex);
+        }
+    }
+
+    private void setupUsingAPI(){
+
     }
 }

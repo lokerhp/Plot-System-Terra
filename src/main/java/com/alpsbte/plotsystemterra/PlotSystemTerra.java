@@ -5,6 +5,7 @@ import com.alpsbte.plotsystemterra.commands.CMD_PastePlot;
 import com.alpsbte.plotsystemterra.commands.CMD_PlotSystemTerra;
 import com.alpsbte.plotsystemterra.core.DatabaseConnection;
 import com.alpsbte.plotsystemterra.core.EventListener;
+import com.alpsbte.plotsystemterra.core.api.PlotSystemAPI;
 import com.alpsbte.plotsystemterra.core.config.ConfigManager;
 import com.alpsbte.plotsystemterra.core.config.ConfigNotImplementedException;
 import com.alpsbte.plotsystemterra.core.config.ConfigPaths;
@@ -45,6 +46,9 @@ public class PlotSystemTerra extends JavaPlugin {
     public boolean updateInstalled = false;
     public Updater updater;
 
+    //true == database, false == api
+    private boolean usesDatabase = true;
+
     @Override
     public void onEnable() {
         System.setProperty("org.apache.commons.logging.Log", "org.apache.commons.logging.impl.NoOpLog"); // Disable Logging
@@ -84,22 +88,36 @@ public class PlotSystemTerra extends JavaPlugin {
         this.configManager.reloadConfigs();
 
         // Initialize database connection
-        try {
-            FileConfiguration configFile = PlotSystemTerra.getPlugin().getConfig();
+        if(getConfig().getString(ConfigPaths.DATA_MODE).equalsIgnoreCase(DataMode.API.toString())) usesDatabase = false;
 
-            if(configFile.getString(ConfigPaths.DATA_MODE).equalsIgnoreCase(DataMode.DATABASE.toString())){
-                DatabaseConnection.InitializeDatabase();
-                Bukkit.getConsoleSender().sendMessage(successPrefix + "Successfully initialized database connection.");
+        if(usesDatabase) {
+            try {
+                FileConfiguration configFile = PlotSystemTerra.getPlugin().getConfig();
+
+                if (configFile.getString(ConfigPaths.DATA_MODE).equalsIgnoreCase(DataMode.DATABASE.toString())) {
+                    DatabaseConnection.InitializeDatabase();
+                    Bukkit.getConsoleSender().sendMessage(successPrefix + "Successfully initialized database connection.");
+                }
+
+
+            } catch (Exception ex) {
+                Bukkit.getConsoleSender().sendMessage(errorPrefix + "Could not initialize database connection.");
+                Bukkit.getLogger().log(Level.SEVERE, ex.getMessage(), ex);
+
+                this.getServer().getPluginManager().disablePlugin(this);
+                return;
             }
+        } else {
+            String teamID = PlotSystemAPI.getInstance().getTeamID();
+            if(teamID == null) {
+                Bukkit.getConsoleSender().sendMessage(errorPrefix + "Could not initialize API connection.");
+                Bukkit.getConsoleSender().sendMessage(ChatColor.YELLOW + "The API must be configured!");
 
-
-
-        } catch (Exception ex) {
-            Bukkit.getConsoleSender().sendMessage(errorPrefix + "Could not initialize database connection.");
-            Bukkit.getLogger().log(Level.SEVERE, ex.getMessage(), ex);
-
-            this.getServer().getPluginManager().disablePlugin(this);
-            return;
+                this.getServer().getPluginManager().disablePlugin(this);
+                return;
+            }
+            Bukkit.getConsoleSender().sendMessage(successPrefix + "Successfully initialized API connection.");
+            Bukkit.getConsoleSender().sendMessage(ChatColor.YELLOW + "Team ID: " + teamID);
         }
 
         // Register event listeners
@@ -261,5 +279,9 @@ public class PlotSystemTerra extends JavaPlugin {
         public static WorldEditPlugin getWorldEditPlugin() {
             return (WorldEditPlugin) Bukkit.getServer().getPluginManager().getPlugin("WorldEdit");
         }
+    }
+
+    public boolean usesDatabase() {
+        return usesDatabase;
     }
 }
