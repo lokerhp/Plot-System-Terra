@@ -2,6 +2,9 @@ package com.alpsbte.plotsystemterra.core.plotsystem;
 
 import com.alpsbte.plotsystemterra.PlotSystemTerra;
 import com.alpsbte.plotsystemterra.core.DatabaseConnection;
+import com.alpsbte.plotsystemterra.core.api.HttpResponse;
+import com.alpsbte.plotsystemterra.core.api.PlotSystemAPI;
+import com.alpsbte.plotsystemterra.core.api.RequestMethod;
 import com.alpsbte.plotsystemterra.core.config.ConfigPaths;
 import com.alpsbte.plotsystemterra.utils.FTPManager;
 import com.alpsbte.plotsystemterra.utils.Utils;
@@ -119,7 +122,8 @@ public class PlotCreator {
                         environmentRegionPoints.forEach(p -> {
                             int highestBlock = minYOffset;
                             for (int y = minYOffset; y <= maxYOffset; y++) {
-                                if (world.getBlockAt(p.getBlockX(), y, p.getBlockZ()).getType() != Material.AIR) highestBlock = y;
+                                if (world.getBlockAt(p.getBlockX(), y, p.getBlockZ()).getType() != Material.AIR)
+                                    highestBlock = y;
                             }
                             if (highestBlock < newYMin.get()) newYMin.set(highestBlock);
                         });
@@ -161,30 +165,45 @@ public class PlotCreator {
 
 
                 // Insert into database
-                connection = DatabaseConnection.getConnection();
+                if (PlotSystemTerra.getPlugin().usesDatabase()) {
+                    connection = DatabaseConnection.getConnection();
+                    if (connection != null) {
+                        connection.setAutoCommit(false);
 
-                if (connection != null) {
-                    connection.setAutoCommit(false);
+                        try (PreparedStatement stmt = Objects.requireNonNull(connection).prepareStatement("INSERT INTO plotsystem_plots (city_project_id, difficulty_id, mc_coordinates, outline, create_date, create_player, version) VALUES (?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
+                            stmt.setInt(1, cityProject.getID());
+                            stmt.setInt(2, difficultyID);
+                            stmt.setString(3, plotCenter.getX() + "," + plotCenter.getY() + "," + plotCenter.getZ());
+                            stmt.setString(4, polyOutline);
+                            stmt.setDate(5, java.sql.Date.valueOf(LocalDate.now()));
+                            stmt.setString(6, player.getUniqueId().toString());
+                            stmt.setDouble(7, PLOT_VERSION);
+                            stmt.executeUpdate();
 
-                    try (PreparedStatement stmt = Objects.requireNonNull(connection).prepareStatement("INSERT INTO plotsystem_plots (city_project_id, difficulty_id, mc_coordinates, outline, create_date, create_player, version) VALUES (?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
-                        stmt.setInt(1, cityProject.getID());
-                        stmt.setInt(2, difficultyID);
-                        stmt.setString(3, plotCenter.getX() + "," + plotCenter.getY() + "," + plotCenter.getZ());
-                        stmt.setString(4, polyOutline);
-                        stmt.setDate(5, java.sql.Date.valueOf(LocalDate.now()));
-                        stmt.setString(6, player.getUniqueId().toString());
-                        stmt.setDouble(7, PLOT_VERSION);
-                        stmt.executeUpdate();
-
-                        // Get the id of the new plot
-                        try (ResultSet rs = stmt.getGeneratedKeys()) {
-                            if (rs.next()) {
-                                plotID = rs.getInt(1);
-                            } else throw new SQLException("Could not obtain generated key");
+                            // Get the id of the new plot
+                            try (ResultSet rs = stmt.getGeneratedKeys()) {
+                                if (rs.next()) {
+                                    plotID = rs.getInt(1);
+                                } else throw new SQLException("Could not obtain generated key");
+                            }
                         }
-                    }
-                } else throw new SQLException("Could not connect to database");
+                    } else throw new SQLException("Could not connect to database");
+                    // Insert into API
+                } else {
+                    Map<String, Object> data = new HashMap<>();
+                    data.put("city_project_id", cityProject.getID());
+                    data.put("difficulty_id", difficultyID);
+                    data.put("mc_coordinates", plotCenter.getX() + "," + plotCenter.getY() + "," + plotCenter.getZ());
+                    data.put("outline", polyOutline);
+                    data.put("create_date", java.sql.Date.valueOf(LocalDate.now()));
+                    data.put("create_player", player.getUniqueId().toString());
+                    data.put("version", PLOT_VERSION);
 
+                    HttpResponse response = PlotSystemAPI.getInstance().makeRequest("teams/%API_KEY%/plots", RequestMethod.POST, data);
+                    if (response.getResponseCode() == 200) {
+                        plotID = Integer.parseInt(response.getBody().getAsJsonObject().get("id").toString());
+                    } else throw new Exception("Could not create plot!");
+                }
 
                 // Save plot and environment regions to schematic files
                 // Get plot schematic file path
@@ -211,8 +230,10 @@ public class PlotCreator {
                 // Upload schematic files to SFTP/FTP server if enabled
                 FTPConfiguration ftpConfiguration = cityProject.getFTPConfiguration();
                 if (ftpConfiguration != null) {
-                    if (environmentEnabled) FTPManager.uploadSchematics(FTPManager.getFTPUrl(ftpConfiguration, cityProject.getID()), new File(plotFilePath), new File(environmentFilePath));
-                    else FTPManager.uploadSchematics(FTPManager.getFTPUrl(ftpConfiguration, cityProject.getID()), new File(plotFilePath));
+                    if (environmentEnabled)
+                        FTPManager.uploadSchematics(FTPManager.getFTPUrl(ftpConfiguration, cityProject.getID()), new File(plotFilePath), new File(environmentFilePath));
+                    else
+                        FTPManager.uploadSchematics(FTPManager.getFTPUrl(ftpConfiguration, cityProject.getID()), new File(plotFilePath));
                 }
 
 
@@ -243,8 +264,6 @@ public class PlotCreator {
     }
 
 
-
-
     /**
      * Creates a plot schematic of a selected region from the player.
      *
@@ -272,7 +291,7 @@ public class PlotCreator {
         ForwardExtentCopy forwardExtentCopy = new ForwardExtentCopy(editSession, region, cb, region.getMinimumPoint());
         Operations.complete(forwardExtentCopy);
 
-        try(ClipboardWriter writer = ClipboardFormat.SCHEMATIC.getWriter(new FileOutputStream(schematic, false))) {
+        try (ClipboardWriter writer = ClipboardFormat.SCHEMATIC.getWriter(new FileOutputStream(schematic, false))) {
             writer.write(cb, Objects.requireNonNull(region.getWorld()).getWorldData());
         }
 
@@ -281,8 +300,9 @@ public class PlotCreator {
 
     /**
      * Checks if polygon region contains a sign and update sign text
+     *
      * @param polyRegion WorldEdit region
-     * @param world Region world
+     * @param world      Region world
      * @return true if polygon region contains a sign, false otherwise
      */
     private static boolean containsSign(Polygonal2DRegion polyRegion, World world) {
@@ -292,12 +312,12 @@ public class PlotCreator {
                 for (int k = polyRegion.getMinimumPoint().getBlockZ(); k <= polyRegion.getMaximumPoint().getBlockZ(); k++) {
                     if (polyRegion.contains(new Vector(i, j, k))) {
                         Block block = world.getBlockAt(i, j, k);
-                        if(block.getType().equals(Material.SIGN_POST) || block.getType().equals(Material.WALL_SIGN)) {
+                        if (block.getType().equals(Material.SIGN_POST) || block.getType().equals(Material.WALL_SIGN)) {
                             hasSign = true;
 
                             Sign sign = (Sign) block.getState();
                             for (int s = 0; s < 4; s++) {
-                                if(s == 1) {
+                                if (s == 1) {
                                     sign.setLine(s, "§c§lStreet Side");
                                 } else {
                                     sign.setLine(s, "");
@@ -314,9 +334,10 @@ public class PlotCreator {
 
     /**
      * Places a plot marker in the center of the polygon region
+     *
      * @param plotRegion WorldEdit region
-     * @param player Player
-     * @param plotID Plot ID
+     * @param player     Player
+     * @param plotID     Plot ID
      */
     private static void placePlotMarker(Region plotRegion, Player player, int plotID) {
         Vector centerBlock = plotRegion.getCenter();
@@ -328,7 +349,7 @@ public class PlotCreator {
             Block signBlock = player.getWorld().getBlockAt(highestBlock);
 
             Sign sign = (Sign) signBlock.getState();
-            org.bukkit.material.Sign matSign =  new org.bukkit.material.Sign(Material.SIGN_POST);
+            org.bukkit.material.Sign matSign = new org.bukkit.material.Sign(Material.SIGN_POST);
             matSign.setFacingDirection(getPlayerFaceDirection(player).getOppositeFace());
             sign.setData(matSign);
             sign.setLine(0, "§8§lID: §c§l" + plotID);
@@ -340,14 +361,17 @@ public class PlotCreator {
 
     /**
      * Gets the direction the player is facing
+     *
      * @param player Player
      * @return Direction
      */
     private static BlockFace getPlayerFaceDirection(Player player) {
         float y = player.getLocation().getYaw();
-        if( y < 0 ){y += 360;}
+        if (y < 0) {
+            y += 360;
+        }
         y %= 360;
-        int i = (int)((y+8) / 22.5);
+        int i = (int) ((y + 8) / 22.5);
         return BlockFace.values()[i];
     }
 }

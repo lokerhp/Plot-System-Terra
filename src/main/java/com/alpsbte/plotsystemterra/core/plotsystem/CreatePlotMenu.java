@@ -1,8 +1,13 @@
 package com.alpsbte.plotsystemterra.core.plotsystem;
 
+import com.alpsbte.plotsystemterra.PlotSystemTerra;
 import com.alpsbte.plotsystemterra.core.DatabaseConnection;
+import com.alpsbte.plotsystemterra.core.api.PlotSystemAPI;
 import com.alpsbte.plotsystemterra.utils.ItemBuilder;
 import com.alpsbte.plotsystemterra.utils.LoreBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -12,6 +17,7 @@ import org.ipvp.canvas.Menu;
 import org.ipvp.canvas.mask.BinaryMask;
 import org.ipvp.canvas.mask.Mask;
 import org.ipvp.canvas.type.ChestMenu;
+import org.json.simple.JSONArray;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -26,6 +32,12 @@ public class CreatePlotMenu {
     private final List<CityProject> cityProjects = getCityProjects();
     private int selectedCityID = -1;
 
+    private final ItemStack couldNotLoad = new ItemBuilder(Material.BARRIER)
+            .setName("§c§lError")
+            .setLore(new LoreBuilder()
+                    .addLine("Could not load city project.")
+                    .build())
+            .build();
     private final Player player;
 
     public CreatePlotMenu(Player player) {
@@ -129,23 +141,32 @@ public class CreatePlotMenu {
         List<CityProject> listProjects = new ArrayList<>();
 
         int counter = 0;
-        try (ResultSet rs = DatabaseConnection.createStatement("SELECT id FROM plotsystem_city_projects").executeQuery()) {
-            while (rs.next()) {
-                CityProject city = new CityProject(rs.getInt(1));
-                createPlotMenu.getSlot(9 + counter).setItem(city.getItem());
-                listProjects.add(city);
-                counter++;
+        if(PlotSystemTerra.getPlugin().usesDatabase()) {
+            try (ResultSet rs = DatabaseConnection.createStatement("SELECT id FROM plotsystem_city_projects").executeQuery()) {
+                while (rs.next()) {
+                    CityProject city = new CityProject(rs.getInt(1));
+                    createPlotMenu.getSlot(9 + counter).setItem(city.getItem());
+                    listProjects.add(city);
+                    counter++;
+                }
+
+                DatabaseConnection.closeResultSet(rs);
+            } catch (SQLException ex) {
+                createPlotMenu.getSlot(9 + counter).setItem(couldNotLoad);
             }
-
-            DatabaseConnection.closeResultSet(rs);
-
-        } catch (SQLException ex) {
-            createPlotMenu.getSlot(9 + counter).setItem(new ItemBuilder(Material.BARRIER)
-                .setName("§c§lError")
-                .setLore(new LoreBuilder()
-                        .addLine("Could not load city project.")
-                        .build())
-            .build());
+        } else {
+            try {
+                JsonArray array = PlotSystemAPI.getInstance().getDataForPSUrl("teams/%API_KEY%/city_projects").getAsJsonArray();
+                    for (JsonElement a : array) {
+                        JsonObject object = a.getAsJsonObject();
+                         CityProject city = new CityProject(Integer.parseInt(object.get("id").toString()));
+                        createPlotMenu.getSlot(9 + counter).setItem(city.getItem());
+                        listProjects.add(city);
+                        counter++;
+                    }
+            } catch (Exception e) {
+                createPlotMenu.getSlot(9 + counter).setItem(couldNotLoad);
+            }
         }
 
         return listProjects;

@@ -2,9 +2,12 @@ package com.alpsbte.plotsystemterra.core.plotsystem;
 
 import com.alpsbte.plotsystemterra.PlotSystemTerra;
 import com.alpsbte.plotsystemterra.core.DatabaseConnection;
+import com.alpsbte.plotsystemterra.core.api.PlotSystemAPI;
 import com.alpsbte.plotsystemterra.utils.ItemBuilder;
 import com.alpsbte.plotsystemterra.utils.LoreBuilder;
 import com.alpsbte.plotsystemterra.utils.Utils;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import org.bukkit.Bukkit;
 import org.bukkit.inventory.ItemStack;
 
@@ -18,11 +21,14 @@ public class CityProject {
     private String name;
     private int countryID;
     private String headID;
+    private boolean usesDB;
 
     public CityProject(int ID) {
         this.ID = ID;
 
-        if(PlotSystemTerra.getPlugin().usesDatabase()){
+        this.usesDB = PlotSystemTerra.getPlugin().usesDatabase();
+
+        if(usesDB){
             setupUsingDB();
         } else {
             setupUsingAPI();
@@ -38,48 +44,38 @@ public class CityProject {
     }
 
     public FTPConfiguration getFTPConfiguration() {
-        try (ResultSet rsServer = DatabaseConnection.createStatement("SELECT server_id FROM plotsystem_countries WHERE id = ?")
-                .setValue(countryID).executeQuery()) {
-
-            if (rsServer.next()) {
-                try (ResultSet rsFTP = DatabaseConnection.createStatement("SELECT ftp_configuration_id FROM plotsystem_servers WHERE id = ?")
-                        .setValue(rsServer.getInt(1)).executeQuery()) {
-
-                    if (rsFTP.next()) {
-                        int ftpID = rsFTP.getInt(1);
-                        if (!rsFTP.wasNull()){
-                            DatabaseConnection.closeResultSet(rsServer);
-                            DatabaseConnection.closeResultSet(rsFTP);
-                            return new FTPConfiguration(ftpID);
-                        }
-                    }
-
-                    DatabaseConnection.closeResultSet(rsFTP);
-                }
-            }
-
-            DatabaseConnection.closeResultSet(rsServer);
-
-        } catch (SQLException ex) {
-            Bukkit.getLogger().log(Level.SEVERE, "Could not check for FTP-Configuration for city project (" + ID + ")!", ex);
+        if (usesDB){
+            return getFTPUsingDB();
         }
-        return null;
+        return getFTPUsingAPI();
     }
 
-    public int getServerID() throws SQLException {
-        try (ResultSet rs = DatabaseConnection.createStatement("SELECT server_id FROM plotsystem_countries WHERE id = ?")
-                .setValue(this.countryID).executeQuery()) {
+    public int getServerID(){
+        if(usesDB){
+            try (ResultSet rs = DatabaseConnection.createStatement("SELECT server_id FROM plotsystem_countries WHERE id = ?")
+                    .setValue(this.countryID).executeQuery()) {
 
-            if (rs.next()) {
-                int i = rs.getInt(1);
+                if (rs.next()) {
+                    int i = rs.getInt(1);
+                    DatabaseConnection.closeResultSet(rs);
+                    return i;
+                }
+
                 DatabaseConnection.closeResultSet(rs);
-                return i;
+
+                return 1;
+            } catch (SQLException ex) {
+                Bukkit.getLogger().log(Level.SEVERE, "A SQL error occurred!", ex);
             }
-
-            DatabaseConnection.closeResultSet(rs);
-
-            return 1;
+        } else {
+            try {
+                JsonObject object = PlotSystemAPI.getInstance().getDataForPSUrl("teams/%API_KEY%/countries/" + this.countryID);
+                return Integer.parseInt(object.get("server_id").toString());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
+        return 0;
     }
 
     public ItemStack getItem() {
@@ -118,6 +114,49 @@ public class CityProject {
     }
 
     private void setupUsingAPI(){
+        try {
+            JsonObject object = PlotSystemAPI.getInstance().getDataForPSUrl("teams/%API_KEY%/city_projects/" + ID);
+            this.name = object.get("name").toString();
+            this.countryID = Integer.parseInt(object.get("country_id").toString());
+            this.headID = PlotSystemAPI.getInstance().getDataForURL("teams/%API_KEY%/headID").get("buildTeamHeadID").toString();
 
+        } catch (Exception e) {
+            Bukkit.getLogger().log(Level.SEVERE, "Failed to setup cityproject from API!", e);
+            e.printStackTrace();
+        }
+    }
+
+    private FTPConfiguration getFTPUsingDB(){
+        //DATABASE
+        try (ResultSet rsServer = DatabaseConnection.createStatement("SELECT server_id FROM plotsystem_countries WHERE id = ?")
+                .setValue(countryID).executeQuery()) {
+
+            if (rsServer.next()) {
+                try (ResultSet rsFTP = DatabaseConnection.createStatement("SELECT ftp_configuration_id FROM plotsystem_servers WHERE id = ?")
+                        .setValue(rsServer.getInt(1)).executeQuery()) {
+
+                    if (rsFTP.next()) {
+                        int ftpID = rsFTP.getInt(1);
+                        if (!rsFTP.wasNull()){
+                            DatabaseConnection.closeResultSet(rsServer);
+                            DatabaseConnection.closeResultSet(rsFTP);
+                            return new FTPConfiguration(ftpID);
+                        }
+                    }
+
+                    DatabaseConnection.closeResultSet(rsFTP);
+                }
+            }
+
+            DatabaseConnection.closeResultSet(rsServer);
+
+        } catch (SQLException ex) {
+            Bukkit.getLogger().log(Level.SEVERE, "Could not check for FTP-Configuration for city project (" + ID + ")!", ex);
+        }
+        return null;
+    }
+
+    private FTPConfiguration getFTPUsingAPI(){
+        return new FTPConfiguration(0);
     }
 }
